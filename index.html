@@ -1,21 +1,67 @@
 <!doctype html>
 <html lang="es">
-<head>
-  <meta charset="utf-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src &#x27;none&#x27;; script-src &#x27;self&#x27;; style-src &#x27;self&#x27; &#x27;unsafe-inline&#x27;; img-src &#x27;self&#x27; data:; font-src &#x27;self&#x27;; connect-src https://overshoot-boozy-overlook.ngrok-free.dev; base-uri &#x27;none&#x27;; form-action &#x27;none&#x27;; object-src &#x27;none&#x27;; upgrade-insecure-requests">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#17191F">
-  <meta name="color-scheme" content="dark">
-  <meta name="description" content="Un espacio para evaluar interpretaciones de IA con criterio humano.">
-  <title>Criterio · Evaluación humana</title>
-  <link rel="icon" href="./favicon.svg?v=2" type="image/svg+xml">
-  <link rel="stylesheet" href="./styles.css?v=18">
-  <script src="./connection.js?v=1" defer></script>
-  <script src="./queue.js?v=6" defer></script>
-  <script src="./app.js?v=22" defer></script>
-</head>
-<body>
-  <div id="app"><div class="loading-screen"><span class="spinner"></span><p>Preparando tu espacio de evaluación…</p></div></div>
-  <div id="announcer" class="sr-only" role="status" aria-live="polite"></div>
-</body>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'none'; base-uri 'none'; form-action 'none'">
+<title>Recuperar pendientes · Criterio</title>
+<style>
+  body { color: #222622; background: #f7f7f3; font: 1rem/1.55 system-ui, sans-serif; margin: 0; }
+  main { max-width: 37rem; margin: 10vh auto; padding: 1.5rem; }
+  h1 { line-height: 1.1; } button { padding: .65rem 1rem; font: inherit; cursor: pointer; } a { color: #215444; }
+</style>
+<main>
+  <h1>Criterio cambió de dirección</h1>
+  <p>Pide el nuevo enlace al responsable por el canal habitual del semillero.</p>
+  <p>Si evaluaste desde aquí, puedes revisar si este navegador todavía guarda respuestas pendientes. Usa el mismo equipo y perfil de navegador con el que evaluaste.</p>
+  <button id="check">Buscar pendientes en este navegador</button>
+  <p id="result" role="status"></p>
+  <a id="download" hidden download="Criterio-respuestas-pendientes.json">Descargar pendientes</a>
+</main>
+<script>
+  'use strict';
+  const button = document.querySelector('#check');
+  const result = document.querySelector('#result');
+  const download = document.querySelector('#download');
+  let temporaryURL;
+  function readQueue(name) {
+    return new Promise((resolve, reject) => {
+      const request = indexedDB.open(name);
+      let absent = false;
+      request.onupgradeneeded = () => { absent = true; request.transaction.abort(); };
+      request.onerror = () => { if (absent) resolve([]); else reject(Error('No se pudo abrir el almacenamiento local.')); };
+      request.onblocked = () => reject(Error('Cierra las otras pestañas de Criterio y vuelve a intentarlo.'));
+      request.onsuccess = () => {
+        const db = request.result;
+        if (!db.objectStoreNames.contains('outboxes')) { db.close(); resolve([]); return; }
+        const tx = db.transaction('outboxes', 'readonly');
+        const cursor = tx.objectStore('outboxes').openCursor();
+        const rows = [];
+        cursor.onsuccess = () => {
+          if (!cursor.result) return;
+          const {key,value} = cursor.result;
+          if (Object.keys(value?.pending || {}).length) rows.push({...value, key});
+          cursor.result.continue();
+        };
+        tx.oncomplete = () => { db.close(); resolve(rows); };
+        tx.onabort = tx.onerror = () => { db.close(); reject(Error('No se pudo terminar la lectura.')); };
+      };
+    });
+  }
+  button.onclick = async () => {
+    button.disabled = true;
+    download.hidden = true;
+    if (temporaryURL) URL.revokeObjectURL(temporaryURL);
+    try {
+      const dbName = location.hostname.endsWith('.github.io') ? 'criterio-evaluaciones-pendientes' : 'criterio-pendientes';
+      const outboxes = await readQueue(dbName);
+      const count = outboxes.reduce((sum, box) => sum + Object.keys(box.pending).length, 0);
+      if (!count) { result.textContent = 'Este navegador no tiene respuestas pendientes para esta dirección.'; return; }
+      const content = {format:'criterio-pendientes-v1', exportedAt:new Date().toISOString(), outboxes};
+      temporaryURL = URL.createObjectURL(new Blob([JSON.stringify(content, null, 2)], {type:'application/json'}));
+      download.href = temporaryURL; download.hidden = false;
+      result.textContent = 'Respuestas pendientes: ' + count + '. Guarda el archivo y revísalo en el nuevo portal. Esta copia se conserva en el navegador.';
+    } catch (error) { result.textContent = error.message || 'No se pudo leer este navegador.'; }
+    finally { button.disabled = false; }
+  };
+</script>
 </html>
